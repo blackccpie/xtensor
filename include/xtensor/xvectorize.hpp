@@ -6,12 +6,13 @@
 * The full license is in the file LICENSE, distributed with this software. *
 ****************************************************************************/
 
-#ifndef XVECTORIZE_HPP
-#define XVECTORIZE_HPP
+#ifndef XTENSOR_VECTORIZE_HPP
+#define XTENSOR_VECTORIZE_HPP
 
 #include <type_traits>
 #include <utility>
 
+#include "xfunction.hpp"
 #include "xutils.hpp"
 
 namespace xt

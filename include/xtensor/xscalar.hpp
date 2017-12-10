@@ -6,16 +6,19 @@
 * The full license is in the file LICENSE, distributed with this software. *
 ****************************************************************************/
 
-#ifndef XSCALAR_HPP
-#define XSCALAR_HPP
+#ifndef XTENSOR_SCALAR_HPP
+#define XTENSOR_SCALAR_HPP
 
 #include <array>
 #include <cstddef>
 #include <utility>
 
+#include "xtl/xtype_traits.hpp"
+
 #include "xexpression.hpp"
 #include "xiterable.hpp"
 #include "xlayout.hpp"
+#include "xtensor_simd.hpp"
 
 namespace xt
 {
@@ -60,6 +63,7 @@ namespace xt
         using const_pointer = const value_type*;
         using size_type = std::size_t;
         using difference_type = std::ptrdiff_t;
+        using simd_value_type = xsimd::simd_type<value_type>;
 
         using iterable_base = xiterable<self_type>;
         using inner_shape_type = typename iterable_base::inner_shape_type;
@@ -108,12 +112,22 @@ namespace xt
 
         template <class... Args>
         reference operator()(Args...) noexcept;
-        reference operator[](const xindex&) noexcept;
+        template <class... Args>
+        reference at(Args...);
+        template <class S>
+        disable_integral_t<S, reference> operator[](const S&) noexcept;
+        template <class I>
+        reference operator[](std::initializer_list<I>) noexcept;
         reference operator[](size_type) noexcept;
 
         template <class... Args>
         const_reference operator()(Args...) const noexcept;
-        const_reference operator[](const xindex&) const noexcept;
+        template <class... Args>
+        const_reference at(Args...) const;
+        template <class S>
+        disable_integral_t<S, const_reference> operator[](const S&) const noexcept;
+        template <class I>
+        const_reference operator[](std::initializer_list<I>) const noexcept;
         const_reference operator[](size_type) const noexcept;
 
         template <class It>
@@ -232,6 +246,11 @@ namespace xt
         reference data_element(size_type i) noexcept;
         const_reference data_element(size_type i) const noexcept;
 
+        template <class align, class simd = simd_value_type>
+        void store_simd(size_type i, const simd& e);
+        template <class align, class simd = simd_value_type>
+        simd load_simd(size_type i) const;
+
     private:
 
         CT m_value;
@@ -240,6 +259,42 @@ namespace xt
         friend class xiterable<self_type>;
     };
 #undef DL
+
+    namespace detail
+    {
+        template <class E>
+        struct is_xscalar_impl : std::false_type
+        {
+        };
+
+        template <class E>
+        struct is_xscalar_impl<xscalar<E>> : std::true_type
+        {
+        };
+    }
+
+    template <class E>
+    using is_xscalar = detail::is_xscalar_impl<E>;
+
+    namespace detail
+    {
+        template <class... E>
+        struct all_xscalar
+        {
+            static constexpr bool value = xtl::conjunction<is_xscalar<std::decay_t<E>>...>::value;
+        };
+    }
+
+    // Note: MSVC bug workaround. Cannot just define
+    // template <class... E>
+    // using all_xscalar = xtl::conjunction<is_xscalar<std::decay_t<E>>...>;
+
+    template <class... E>
+    using all_xscalar = detail::all_xscalar<E...>;
+
+    /******************
+     * xref and xcref *
+     ******************/
 
     template <class T>
     xscalar<T&> xref(T& t);
@@ -418,7 +473,25 @@ namespace xt
     }
 
     template <class CT>
-    inline auto xscalar<CT>::operator[](const xindex&) noexcept -> reference
+    template <class... Args>
+    inline auto xscalar<CT>::at(Args... args) -> reference
+    {
+        check_dimension(shape(), args...);
+        return this->operator()(args...);
+    }
+
+    template <class CT>
+    template <class S>
+    inline auto xscalar<CT>::operator[](const S&) noexcept
+        -> disable_integral_t<S, reference>
+    {
+        return m_value;
+    }
+
+    template <class CT>
+    template <class I>
+    inline auto xscalar<CT>::operator[](std::initializer_list<I>) noexcept
+        -> reference
     {
         return m_value;
     }
@@ -437,7 +510,25 @@ namespace xt
     }
 
     template <class CT>
-    inline auto xscalar<CT>::operator[](const xindex&) const noexcept -> const_reference
+    template <class... Args>
+    inline auto xscalar<CT>::at(Args... args) const -> const_reference
+    {
+        check_dimension(shape(), args...);
+        return this->operator()(args...);
+    }
+
+    template <class CT>
+    template <class S>
+    inline auto xscalar<CT>::operator[](const S&) const noexcept
+        -> disable_integral_t<S, const_reference>
+    {
+        return m_value;
+    }
+
+    template <class CT>
+    template <class I>
+    inline auto xscalar<CT>::operator[](std::initializer_list<I>) const noexcept
+        -> const_reference
     {
         return m_value;
     }
@@ -785,15 +876,29 @@ namespace xt
     }
 
     template <class CT>
-    inline auto xscalar<CT>::data_element(size_type) noexcept->reference
+    inline auto xscalar<CT>::data_element(size_type) noexcept -> reference
     {
         return m_value;
     }
-    
+
     template <class CT>
-    inline auto xscalar<CT>::data_element(size_type) const noexcept->const_reference
+    inline auto xscalar<CT>::data_element(size_type) const noexcept -> const_reference
     {
         return m_value;
+    }
+
+    template <class CT>
+    template <class align, class simd>
+    inline void xscalar<CT>::store_simd(size_type, const simd& e)
+    {
+        m_value = static_cast<value_type>(e[0]);
+    }
+
+    template <class CT>
+    template <class align, class simd>
+    inline auto xscalar<CT>::load_simd(size_type) const -> simd
+    {
+        return xsimd::set_simd<value_type, typename simd::value_type>(m_value);
     }
 
     template <class T>
@@ -893,7 +998,7 @@ namespace xt
     }
 
     template <bool is_const, class CT>
-    inline auto xdummy_iterator<is_const, CT>::operator++(int) noexcept -> self_type
+    inline auto xdummy_iterator<is_const, CT>::operator++(int)noexcept -> self_type
     {
         self_type tmp(*this);
         ++(*this);

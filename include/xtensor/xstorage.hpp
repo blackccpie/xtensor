@@ -6,8 +6,8 @@
 * The full license is in the file LICENSE, distributed with this software. *
 ****************************************************************************/
 
-#ifndef XSTORAGE_HPP
-#define XSTORAGE_HPP
+#ifndef XTENSOR_STORAGE_HPP
+#define XTENSOR_STORAGE_HPP
 
 #include <algorithm>
 #include <functional>
@@ -217,7 +217,7 @@ namespace xt
     }
 
     template <class T, class A>
-    inline uvector< T, A>::uvector(const allocator_type& alloc) noexcept
+    inline uvector<T, A>::uvector(const allocator_type& alloc) noexcept
         : m_allocator(alloc), p_begin(nullptr), p_end(nullptr)
     {
     }
@@ -344,7 +344,7 @@ namespace xt
     template <class T, class A>
     inline auto uvector<T, A>::size() const noexcept -> size_type
     {
-        return p_end - p_begin;
+        return static_cast<size_type>(p_end - p_begin);
     }
 
     template <class T, class A>

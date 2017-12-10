@@ -155,6 +155,41 @@ namespace xt
         }
     }
 
+    TEST(xfunction, at)
+    {
+        xfunction_features f;
+        size_t i = f.m_a.shape()[0] - 1;
+        size_t j = f.m_a.shape()[1] - 1;
+        size_t k = f.m_a.shape()[2] - 1;
+
+        {
+            SCOPED_TRACE("same shape");
+            int a = (f.m_a + f.m_a).at(i, j, k);
+            int b = f.m_a.at(i, j, k) + f.m_a.at(i, j, k);
+            EXPECT_EQ(a, b);
+            EXPECT_ANY_THROW((f.m_a + f.m_a).at(0, 0, 0, 0));
+            EXPECT_ANY_THROW((f.m_a + f.m_a).at(10, 10, 10));
+        }
+
+        {
+            SCOPED_TRACE("different shape");
+            int a = (f.m_a + f.m_b).at(i, j, k);
+            int b = f.m_a.at(i, j, k) + f.m_b.at(i, 0, k);
+            EXPECT_EQ(a, b);
+            EXPECT_ANY_THROW((f.m_a + f.m_a).at(0, 0, 0, 0));
+            EXPECT_ANY_THROW((f.m_a + f.m_a).at(10, 10, 10));
+        }
+
+        {
+            SCOPED_TRACE("different dimensions");
+            int a = (f.m_a + f.m_c).at(1, i, j, k);
+            int b = f.m_a.at(i, j, k) + f.m_c.at(1, i, j, k);
+            EXPECT_EQ(a, b);
+            EXPECT_ANY_THROW((f.m_a + f.m_a).at(0, 0, 0, 0, 0));
+            EXPECT_ANY_THROW((f.m_a + f.m_a).at(10, 10, 10, 10));
+        }
+    }
+
     TEST(xfunction, indexed_access)
     {
         xfunction_features f;
@@ -168,6 +203,7 @@ namespace xt
             int a = (f.m_a + f.m_a)[index];
             int b = f.m_a[index] + f.m_a[index];
             EXPECT_EQ(a, b);
+            EXPECT_EQ(((f.m_a + f.m_a)[{0, 0, 0}]), (f.m_a[{0, 0, 0}] + f.m_a[{0, 0, 0}]));
         }
 
         {
@@ -177,6 +213,7 @@ namespace xt
             index2[1] = 0;
             int b = f.m_a[index] + f.m_b[index2];
             EXPECT_EQ(a, b);
+            EXPECT_EQ(((f.m_a + f.m_b)[{0, 0, 0}]), (f.m_a[{0, 0, 0}] + f.m_b[{0, 0, 0}]));
         }
 
         {
@@ -189,6 +226,7 @@ namespace xt
             int a = (f.m_a + f.m_c)[index2];
             int b = f.m_a[index] + f.m_c[index2];
             EXPECT_EQ(a, b);
+            EXPECT_EQ(((f.m_a + f.m_c)[{0, 0, 0, 0}]), (f.m_a[{0, 0, 0, 0}] + f.m_c[{0, 0, 0, 0}]));
         }
     }
 

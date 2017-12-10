@@ -88,7 +88,9 @@ Two container types are provided. ``xarray`` (dynamic number of dimensions) and 
 | ``np.array([[3, 4], [5, 6]])``                 | | ``xt::xarray<double>({{3, 4}, {5, 6}})``     |
 |                                                | | ``xt::xtensor<double, 2>({{3, 4}, {5, 6}})`` |
 +------------------------------------------------+------------------------------------------------+
-| ``arr.reshape([3, 4])``                        | ``arr.reshape{{3, 4})``                        |
+| ``arr.reshape([3, 4])``                        | ``arr.reshape({3, 4})``                        |
++------------------------------------------------+------------------------------------------------+
+| ``arr.astype(np.float64)``                     | ``xt::cast<double>(arr)``                      |
 +------------------------------------------------+------------------------------------------------+
 
 Initializers
@@ -303,6 +305,35 @@ hold any values and are computed upon access or assigmnent.
 More generally, one can use the ``xt::reduce(function, input, axes)`` which allows the specification
 of an arbitrary binary function for the reduction. The binary function must be cummutative and
 associative up to rounding errors.
+
+I/O
+---
+
+**Print options**
+
+These options determine the way floating point numbers, tensors and other xtensor expressions are displayed.
+
++-----------------------------------------------+-----------------------------------------------+
+|            Python 3 - numpy                   |                C++ 14 - xtensor               |
++===============================================+===============================================+
+| ``np.set_printoptions(precision=4)``          | ``xt::print_options::set_precision(4)``       |
++-----------------------------------------------+-----------------------------------------------+
+| ``np.set_printoptions(threshold=5)``          | ``xt::print_options::set_threshold(5)``       |
++-----------------------------------------------+-----------------------------------------------+
+| ``np.set_printoptions(edgeitems=3)``          | ``xt::print_options::set_edgeitems(3)``       |
++-----------------------------------------------+-----------------------------------------------+
+
+**Reading npy, csv file formats**
+
+Functions ``load_csv`` and ``dump_csv`` respectively take input and output streams as arguments.
+
++-----------------------------------------------+-----------------------------------------------+
+|            Python 3 - numpy                   |                C++ 14 - xtensor               |
++===============================================+===============================================+
+| ``np.load(file)``                             | ``xt::load_npy<double>(filename)``            |
++-----------------------------------------------+-----------------------------------------------+
+| ``np.load_txt(filename, delimiter=',')``      | ``xt::load_csv<double>(stream)``              |
++-----------------------------------------------+-----------------------------------------------+
 
 Mathematical functions
 ----------------------

@@ -11,8 +11,8 @@
 
 namespace xt
 {
-    using buffer_adaptor = xbuffer_adaptor<double>;
-    using owner_adaptor = xbuffer_adaptor<double, acquire_ownership>;
+    using buffer_adaptor = xbuffer_adaptor<double*>;
+    using owner_adaptor = xbuffer_adaptor<double*&, acquire_ownership>;
 
     TEST(xbuffer_adaptor, owner_destructor)
     {
@@ -31,7 +31,7 @@ namespace xt
         owner_adaptor adapt2(std::move(adapt));
         EXPECT_EQ(data, adapt2.data());
         EXPECT_EQ(size, adapt2.size());
-        EXPECT_EQ(0, adapt.size());
+        EXPECT_EQ(size_t(0), adapt.size());
     }
 
     TEST(xbuffer_adaptor, owner_copy_assign)
@@ -177,4 +177,3 @@ namespace xt
         delete[] data;
     }
 }
-

@@ -23,7 +23,8 @@ include(CheckCXXCompilerFlag)
 string(TOUPPER "${CMAKE_BUILD_TYPE}" U_CMAKE_BUILD_TYPE)
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Intel")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -Wunused-parameter -Wextra -Wreorder -Wconversion")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -Wunused-parameter -Wextra -Wreorder -Wconversion -Wsign-conversion")
+    #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -Wunused-parameter -Wextra -Wreorder -Wconversion")
     CHECK_CXX_COMPILER_FLAG("-std=c++14" HAS_CPP14_FLAG)
 
     if (HAS_CPP14_FLAG)
@@ -36,11 +37,6 @@ endif()
 if(MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc /MP /bigobj")
     set(CMAKE_EXE_LINKER_FLAGS /MANIFEST:NO)
-    foreach(flag_var
-            CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-            CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-        string(REPLACE "/MD" "-MT" ${flag_var} "${${flag_var}}")
-    endforeach()
 endif()
 
 if(DOWNLOAD_GTEST OR GTEST_SRC_DIR)
@@ -78,11 +74,13 @@ endif()
 find_package(Threads)
 
 include_directories(${XTENSOR_INCLUDE_DIR})
+include_directories(${xtl_INCLUDE_DIRS})
 include_directories(${GTEST_INCLUDE_DIRS})
 
 set(XTENSOR_TESTS
     main.cpp
     test_common.hpp
+    test_xaccumulator.cpp
     test_xadapt.cpp
     test_xadaptor_semantic.cpp
     test_xarray.cpp
@@ -91,23 +89,34 @@ set(XTENSOR_TESTS
     test_xbroadcast.cpp
     test_xbuffer_adaptor.cpp
     test_xbuilder.cpp
+    test_xconcepts.cpp
     test_xcontainer_semantic.cpp
-    test_xdynamicview.cpp
+    test_xcomplex.cpp
+    test_xcsv.cpp
+    test_xdynamic_view.cpp
     test_xeval.cpp
+    test_xexception.cpp
     test_xfunction.cpp
-    test_xindexview.cpp
+    test_xindex_view.cpp
+    test_xinfo.cpp
     test_xiterator.cpp
     test_xio.cpp
     test_xlayout.cpp
     test_xmath.cpp
     test_xnoalias.cpp
+    test_xnorm.cpp
+    test_xnpy.cpp
     test_xoperation.cpp
+    test_xoptional.cpp
+    test_xoptional_assembly.cpp
+    test_xoptional_assembly_adaptor.cpp
     test_xrandom.cpp
     test_xreducer.cpp
     test_xscalar.cpp
     test_xscalar_semantic.cpp
     test_xsemantic.hpp
-    test_xstridedview.cpp
+    test_xstorage.cpp
+    test_xstrided_view.cpp
     test_xtensor.cpp
     test_xtensor_adaptor.cpp
     test_xtensor_semantic.cpp
@@ -115,13 +124,28 @@ set(XTENSOR_TESTS
     test_xview.cpp
     test_xview_semantic.cpp
     test_xutils.cpp
-    test_xcomplex.cpp
-    test_xoptional.cpp
-    test_xstorage.cpp
-    test_xcsv.cpp
 )
 
+# remove xinfo tests for compilers < GCC 5
+if(("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU") AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 5))
+    list(REMOVE_ITEM XTENSOR_TESTS test_xinfo.cpp)
+endif()
+
 set(XTENSOR_TARGET test_xtensor)
+
+# Add files for npy tests
+set(XNPY_FILES
+    bool.npy
+    bool_fortran.npy
+    double.npy
+    double_fortran.npy
+    unsignedlong.npy
+    unsignedlong_fortran.npy
+)
+foreach(filename IN LISTS XNPY_FILES)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/files/xnpy_files/${filename}
+        ${CMAKE_CURRENT_BINARY_DIR}/files/xnpy_files/${filename} COPYONLY)
+endforeach()
 
 add_executable(${XTENSOR_TARGET} ${XTENSOR_TESTS} ${XTENSOR_HEADERS})
 if(DOWNLOAD_GTEST OR GTEST_SRC_DIR)

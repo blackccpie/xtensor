@@ -6,13 +6,17 @@
 * The full license is in the file LICENSE, distributed with this software. *
 ****************************************************************************/
 
-#ifndef XCONTAINER_HPP
-#define XCONTAINER_HPP
+#ifndef XTENSOR_CONTAINER_HPP
+#define XTENSOR_CONTAINER_HPP
 
 #include <algorithm>
 #include <functional>
+#include <iostream>
 #include <numeric>
 #include <stdexcept>
+
+#include "xtl/xmeta_utils.hpp"
+#include "xtl/xsequence.hpp"
 
 #include "xiterable.hpp"
 #include "xiterator.hpp"
@@ -54,6 +58,7 @@ namespace xt
 
         using inner_types = xcontainer_inner_types<D>;
         using container_type = typename inner_types::container_type;
+        using allocator_type = typename container_type::allocator_type;
         using value_type = typename container_type::value_type;
         using reference = typename container_type::reference;
         using const_reference = typename container_type::const_reference;
@@ -61,6 +66,7 @@ namespace xt
         using const_pointer = typename container_type::const_pointer;
         using size_type = typename container_type::size_type;
         using difference_type = typename container_type::difference_type;
+        using simd_value_type = xsimd::simd_type<value_type>;
 
         using shape_type = typename inner_types::shape_type;
         using strides_type = typename inner_types::strides_type;
@@ -76,6 +82,8 @@ namespace xt
 
         static constexpr layout_type static_layout = inner_types::layout;
         static constexpr bool contiguous_layout = static_layout != layout_type::dynamic;
+        using data_alignment = xsimd::container_alignment_t<container_type>;
+        using simd_type = xsimd::simd_type<value_type>;
 
         size_type size() const noexcept;
 
@@ -91,9 +99,22 @@ namespace xt
         template <class... Args>
         const_reference operator()(Args... args) const;
 
-        reference operator[](const xindex& index);
+        template <class... Args>
+        reference at(Args... args);
+
+        template <class... Args>
+        const_reference at(Args... args) const;
+
+        template <class S>
+        disable_integral_t<S, reference> operator[](const S& index);
+        template <class I>
+        reference operator[](std::initializer_list<I> index);
         reference operator[](size_type i);
-        const_reference operator[](const xindex& index) const;
+
+        template <class S>
+        disable_integral_t<S, const_reference> operator[](const S& index) const;
+        template <class I>
+        const_reference operator[](std::initializer_list<I> index) const;
         const_reference operator[](size_type i) const;
 
         template <class It>
@@ -127,7 +148,22 @@ namespace xt
         reference data_element(size_type i);
         const_reference data_element(size_type i) const;
 
+        template <class align, class simd = simd_value_type>
+        void store_simd(size_type i, const simd& e);
+        template <class align, class simd = simd_value_type>
+        simd load_simd(size_type i) const;
 
+#if defined(_MSC_VER) && _MSC_VER >= 1910
+        // Workaround for compiler bug in Visual Studio 2017 with respect to alias templates with non-type parameters.
+        template <layout_type L>
+        using layout_iterator = xiterator<typename iterable_base::stepper, typename iterable_base::inner_shape_type*, L>;
+        template <layout_type L>
+        using const_layout_iterator = xiterator<typename iterable_base::const_stepper, typename iterable_base::inner_shape_type*, L>;
+        template <layout_type L>
+        using reverse_layout_iterator = std::reverse_iterator<layout_iterator<L>>;
+        template <layout_type L>
+        using const_reverse_layout_iterator = std::reverse_iterator<const_layout_iterator<L>>;
+#else
         template <layout_type L>
         using layout_iterator = typename iterable_base::template layout_iterator<L>;
         template <layout_type L>
@@ -136,6 +172,7 @@ namespace xt
         using reverse_layout_iterator = typename iterable_base::template reverse_layout_iterator<L>;
         template <layout_type L>
         using const_reverse_layout_iterator = typename iterable_base::template const_reverse_layout_iterator<L>;
+#endif
 
         template <class S, layout_type L>
         using broadcast_iterator = typename iterable_base::template broadcast_iterator<S, L>;
@@ -153,7 +190,7 @@ namespace xt
 
         template <layout_type L, class It1, class It2>
         using select_iterator_impl = std::conditional_t<L == static_layout, It1, It2>;
-        
+
         template <layout_type L>
         using select_iterator = select_iterator_impl<L, storage_iterator, layout_iterator<L>>;
         template <layout_type L>
@@ -162,7 +199,7 @@ namespace xt
         using select_reverse_iterator = select_iterator_impl<L, reverse_storage_iterator, reverse_layout_iterator<L>>;
         template <layout_type L>
         using select_const_reverse_iterator = select_iterator_impl<L, const_reverse_storage_iterator, const_reverse_layout_iterator<L>>;
-        
+
         using iterator = select_iterator<DL>;
         using const_iterator = select_const_iterator<DL>;
         using reverse_iterator = select_reverse_iterator<DL>;
@@ -325,11 +362,11 @@ namespace xt
         using inner_backstrides_type = typename base_type::inner_backstrides_type;
 
         template <class S = shape_type>
-        void reshape(const S& shape, bool force = false);
+        void reshape(S&& shape, bool force = false);
         template <class S = shape_type>
-        void reshape(const S& shape, layout_type l);
+        void reshape(S&& shape, layout_type l);
         template <class S = shape_type>
-        void reshape(const S& shape, const strides_type& strides);
+        void reshape(S&& shape, const strides_type& strides);
 
         layout_type layout() const noexcept;
 
@@ -371,16 +408,7 @@ namespace xt
     template <class It>
     inline It xcontainer<D>::data_xend_impl(It end, layout_type l) const noexcept
     {
-        if (dimension() == 0)
-        {
-            return end;
-        }
-        else
-        {
-            auto leading_stride = (l == layout_type::row_major ? strides().back() : strides().front());
-            leading_stride = std::max(leading_stride, typename inner_strides_type::value_type(1));
-            return end - 1 + leading_stride;
-        }
+        return strided_data_end(*this, end, l);
     }
 
     template <class D>
@@ -423,7 +451,7 @@ namespace xt
     template <class D>
     inline auto xcontainer<D>::size() const noexcept -> size_type
     {
-        return data().size();
+        return compute_size(shape());
     }
 
     /**
@@ -463,7 +491,6 @@ namespace xt
     }
     //@}
 
-
     /**
      * @name Data
      */
@@ -479,6 +506,7 @@ namespace xt
     inline auto xcontainer<D>::operator()(Args... args) -> reference
     {
         XTENSOR_ASSERT(check_index(shape(), args...));
+        XTENSOR_CHECK_DIMENSION(shape(), args...);
         size_type index = data_offset<size_type>(strides(), static_cast<size_type>(args)...);
         return data()[index];
     }
@@ -494,8 +522,43 @@ namespace xt
     inline auto xcontainer<D>::operator()(Args... args) const -> const_reference
     {
         XTENSOR_ASSERT(check_index(shape(), args...));
+        XTENSOR_CHECK_DIMENSION(shape(), args...);
         size_type index = data_offset<size_type>(strides(), static_cast<size_type>(args)...);
         return data()[index];
+    }
+
+    /**
+     * Returns a reference to the element at the specified position in the container,
+     * after dimension and bounds checking.
+     * @param args a list of indices specifying the position in the container. Indices
+     * must be unsigned integers, the number of indices should be equal to the number of dimensions
+     * of the container.
+     * @exception std::out_of_range if the number of argument is greater than the number of dimensions
+     * or if indices are out of bounds.
+     */
+    template <class D>
+    template <class... Args>
+    inline auto xcontainer<D>::at(Args... args) -> reference
+    {
+        check_access(shape(), static_cast<size_type>(args)...);
+        return this->operator()(args...);
+    }
+
+    /**
+     * Returns a constant reference to the element at the specified position in the container,
+     * after dimension and bounds checking.
+     * @param args a list of indices specifying the position in the container. Indices
+     * must be unsigned integers, the number of indices should be equal to the number of dimensions
+     * of the container.
+     * @exception std::out_of_range if the number of argument is greater than the number of dimensions
+     * or if indices are out of bounds.
+     */
+    template <class D>
+    template <class... Args>
+    inline auto xcontainer<D>::at(Args... args) const -> const_reference
+    {
+        check_access(shape(), static_cast<size_type>(args)...);
+        return this->operator()(args...);
     }
 
     /**
@@ -505,9 +568,18 @@ namespace xt
      * than the number of dimensions of the container.
      */
     template <class D>
-    inline auto xcontainer<D>::operator[](const xindex& index) -> reference
+    template <class S>
+    inline auto xcontainer<D>::operator[](const S& index)
+        -> disable_integral_t<S, reference>
     {
         return element(index.cbegin(), index.cend());
+    }
+
+    template <class D>
+    template <class I>
+    inline auto xcontainer<D>::operator[](std::initializer_list<I> index) -> reference
+    {
+        return element(index.begin(), index.end());
     }
 
     template <class D>
@@ -523,9 +595,18 @@ namespace xt
      * than the number of dimensions of the container.
      */
     template <class D>
-    inline auto xcontainer<D>::operator[](const xindex& index) const -> const_reference
+    template <class S>
+    inline auto xcontainer<D>::operator[](const S& index) const
+        -> disable_integral_t<S, const_reference>
     {
         return element(index.cbegin(), index.cend());
+    }
+
+    template <class D>
+    template <class I>
+    inline auto xcontainer<D>::operator[](std::initializer_list<I> index) const -> const_reference
+    {
+        return element(index.begin(), index.end());
     }
 
     template <class D>
@@ -646,7 +727,7 @@ namespace xt
     template <layout_type L>
     inline auto xcontainer<D>::begin() noexcept -> select_iterator<L>
     {
-        return static_if<L == static_layout>([&](auto self)
+        return xtl::mpl::static_if<L == static_layout>([&](auto self)
         {
             return self(*this).template storage_begin<L>();
         }, /*else*/ [&](auto self)
@@ -659,7 +740,7 @@ namespace xt
     template <layout_type L>
     inline auto xcontainer<D>::end() noexcept -> select_iterator<L>
     {
-        return static_if<L == static_layout>([&](auto self)
+        return xtl::mpl::static_if<L == static_layout>([&](auto self)
         {
             return self(*this).template storage_end<L>();
         }, /*else*/ [&](auto self)
@@ -686,7 +767,7 @@ namespace xt
     template <layout_type L>
     inline auto xcontainer<D>::cbegin() const noexcept -> select_const_iterator<L>
     {
-        return static_if<L == static_layout>([&](auto self)
+        return xtl::mpl::static_if<L == static_layout>([&](auto self)
         {
             return self(*this).template storage_cbegin<L>();
         }, /*else*/ [&](auto self)
@@ -699,7 +780,7 @@ namespace xt
     template <layout_type L>
     inline auto xcontainer<D>::cend() const noexcept -> select_const_iterator<L>
     {
-        return static_if<L == static_layout>([&](auto self)
+        return xtl::mpl::static_if<L == static_layout>([&](auto self)
         {
             return self(*this).template storage_cend<L>();
         }, /*else*/ [&](auto self)
@@ -712,7 +793,7 @@ namespace xt
     template <layout_type L>
     inline auto xcontainer<D>::rbegin() noexcept -> select_reverse_iterator<L>
     {
-        return static_if<L == static_layout>([&](auto self)
+        return xtl::mpl::static_if<L == static_layout>([&](auto self)
         {
             return self(*this).template storage_rbegin<L>();
         }, /*else*/ [&](auto self)
@@ -725,7 +806,7 @@ namespace xt
     template <layout_type L>
     inline auto xcontainer<D>::rend() noexcept -> select_reverse_iterator<L>
     {
-        return static_if<L == static_layout>([&](auto self)
+        return xtl::mpl::static_if<L == static_layout>([&](auto self)
         {
             return self(*this).template storage_rend<L>();
         }, /*else*/ [&](auto self)
@@ -752,7 +833,7 @@ namespace xt
     template <layout_type L>
     inline auto xcontainer<D>::crbegin() const noexcept -> select_const_reverse_iterator<L>
     {
-        return static_if<L == static_layout>([&](auto self)
+        return xtl::mpl::static_if<L == static_layout>([&](auto self)
         {
             return self(*this).template storage_crbegin<L>();
         }, /*else*/ [&](auto self)
@@ -765,7 +846,7 @@ namespace xt
     template <layout_type L>
     inline auto xcontainer<D>::crend() const noexcept -> select_const_reverse_iterator<L>
     {
-        return static_if<L == static_layout>([&](auto self)
+        return xtl::mpl::static_if<L == static_layout>([&](auto self)
         {
             return self(*this).template storage_crend<L>();
         }, /*else*/ [&](auto self)
@@ -1022,6 +1103,22 @@ namespace xt
         return data()[i];
     }
 
+    template <class D>
+    template <class alignment, class simd>
+    inline void xcontainer<D>::store_simd(size_type i, const simd& e)
+    {
+        using align_mode = driven_align_mode_t<alignment, data_alignment>;
+        xsimd::store_simd<value_type, typename simd::value_type>(&(data()[i]), e, align_mode());
+    }
+
+    template <class D>
+    template <class alignment, class simd>
+    inline auto xcontainer<D>::load_simd(size_type i) const -> simd
+    {
+        using align_mode = driven_align_mode_t<alignment, data_alignment>;
+        return xsimd::load_simd<value_type, typename simd::value_type>(&(data()[i]), align_mode());
+    }
+
     /*************************************
      * xstrided_container implementation *
      *************************************/
@@ -1030,14 +1127,14 @@ namespace xt
     inline xstrided_container<D>::xstrided_container() noexcept
         : base_type()
     {
-        m_shape = make_sequence<inner_shape_type>(base_type::dimension(), 1);
+        m_shape = xtl::make_sequence<inner_shape_type>(base_type::dimension(), 1);
     }
 
     template <class D>
     inline xstrided_container<D>::xstrided_container(inner_shape_type&& shape, inner_strides_type&& strides) noexcept
         : base_type(), m_shape(std::move(shape)), m_strides(std::move(strides))
     {
-        m_backstrides = make_sequence<inner_backstrides_type>(m_shape.size(), 0);
+        m_backstrides = xtl::make_sequence<inner_backstrides_type>(m_shape.size(), 0);
         adapt_strides(m_shape, m_strides, m_backstrides);
     }
 
@@ -1087,6 +1184,20 @@ namespace xt
         return m_layout;
     }
 
+    namespace detail
+    {
+        template <class C, class S>
+        inline void resize_data_container(C& c, S size)
+        {
+            c.resize(size);
+        }
+
+        template <class C, class S>
+        inline void resize_data_container(const C&, S)
+        {
+        }
+    }
+
     /**
      * Reshapes the container.
      * @param shape the new shape
@@ -1094,19 +1205,19 @@ namespace xt
      */
     template <class D>
     template <class S>
-    inline void xstrided_container<D>::reshape(const S& shape, bool force)
+    inline void xstrided_container<D>::reshape(S&& shape, bool force)
     {
         if (m_shape.size() != shape.size() || !std::equal(std::begin(shape), std::end(shape), std::begin(m_shape)) || force)
         {
             if (m_layout == layout_type::dynamic || m_layout == layout_type::any)
             {
-                m_layout = layout_type::row_major;  // fall back to row major
+                m_layout = DEFAULT_LAYOUT;  // fall back to default layout
             }
-            m_shape = forward_sequence<shape_type>(shape);
+            m_shape = xtl::forward_sequence<shape_type>(shape);
             resize_container(m_strides, m_shape.size());
             resize_container(m_backstrides, m_shape.size());
             size_type data_size = compute_strides(m_shape, m_layout, m_strides, m_backstrides);
-            this->data().resize(data_size);
+            detail::resize_data_container(this->data(), data_size);
         }
     }
 
@@ -1117,14 +1228,14 @@ namespace xt
      */
     template <class D>
     template <class S>
-    inline void xstrided_container<D>::reshape(const S& shape, layout_type l)
+    inline void xstrided_container<D>::reshape(S&& shape, layout_type l)
     {
         if (base_type::static_layout != layout_type::dynamic && l != base_type::static_layout)
         {
             throw std::runtime_error("Cannot change layout_type if template parameter not layout_type::dynamic.");
         }
         m_layout = l;
-        reshape(shape, true);
+        reshape(std::forward<S>(shape), true);
     }
 
     /**
@@ -1134,18 +1245,18 @@ namespace xt
      */
     template <class D>
     template <class S>
-    inline void xstrided_container<D>::reshape(const S& shape, const strides_type& strides)
+    inline void xstrided_container<D>::reshape(S&& shape, const strides_type& strides)
     {
         if (base_type::static_layout != layout_type::dynamic)
         {
             throw std::runtime_error("Cannot reshape with custom strides when layout() is != layout_type::dynamic.");
         }
-        m_shape = forward_sequence<shape_type>(shape);
+        m_shape = xtl::forward_sequence<shape_type>(shape);
         m_strides = strides;
         resize_container(m_backstrides, m_strides.size());
         adapt_strides(m_shape, m_strides, m_backstrides);
         m_layout = layout_type::dynamic;
-        this->data().resize(compute_size(m_shape));
+        detail::resize_data_container(this->data(), compute_size(m_shape));
     }
 }
 
